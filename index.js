@@ -4,18 +4,32 @@ const express=require('express');
 const ObjectId=require('mongodb').ObjectId; 
 require('dotenv').config();
 
+const bodyParser=require('body-parser');
 const cors=require('cors');
 const app=express();
 const port = process.env.PORT||5001;
+const mongoose = require('mongoose');
+const User = require('./MODEL/user');
+const bycrypt=require('bcryptjs');
+const jwt = require('jsonwebtoken');
+
+mongoose.connect('mongodb://localhost:27017/bd-login-app',{
+    useNewUrlParser:true,
+    useUnifiedTopology:true,
+})
 
 //middlewere
 app.use(cors());
 app.use(express.json());
+app.use(bodyParser.json());
 
 
 //now connect  mongodb to server 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.wjow1.mongodb.net/myFirstDatabase?retryWrites=true&w=majority`;
 const client = new MongoClient(uri, { useNewUrlParser: true, useUnifiedTopology: true });
+
+// test case 
+const JWT_SECRET='sdlgskfoj,hryploteajlryjl';
 
 //token 
 async function verifyToken(req, res, next) {
@@ -44,8 +58,8 @@ async function run(){
 
 
         const database=client.db('TRAVELO');
-        const blogsCollection=database.collection('blogs');
         const usersCollection = database.collection('users');
+        const blogsCollection=database.collection('blogs');
     
 
         //POST API: ADD A  BLOG DETAIL TO DATABASE "blogsCollection" 
@@ -75,25 +89,65 @@ async function run(){
 
 
         //users management 
-                ///
-                app.get('/users/:email', async (req, res) => {
-                    const email = req.params.email;
-                    const query = { email: email };
-                    const user = await usersCollection.findOne(query);
-                    let isAdmin = false;
-                    if (user?.role === 'admin') {
-                        isAdmin = true;
-                    }
-                    res.json({ admin: isAdmin });
-                });
-        
-                //
+  
+            
                 app.post('/users', async (req, res) => {
                     const user = req.body;
+                    const {email,password:plainTextPassword}=user;
+                    if(!email || typeof email != 'string')
+                    {
+                        return res.json({status:'error',error:'Invalid email'})
+                    }
+                    if(!plainTextPassword || typeof plainTextPassword != 'string')
+                    {
+                        return res.json({status:'error',error:'Invalid password'})
+                    }
+                    if(plainTextPassword.length<5)
+                    {
+                        return res.json({status:'error',error:'your password is too small'})
+                    }
+                    const password=await bycrypt.hash(plainTextPassword,10);
+
+                    try{
+                        const response =await User.create({
+                            email,
+                            password
+                        })
+                    } catch(error){
+                        if(error.code === 11000)
+                        {
+                            return res.json({status:'error',error:'User already exist'})
+                        }
+                        throw error ;
+                        return res.json({status:'error'})
+                    }
+
                     const result = await usersCollection.insertOne(user);
-                    console.log(result);
+                    
                     res.json(result);
                 });
+
+
+                ////////login user 
+                app.post('/login', async (req, res) =>{
+                   const {email,password}=req.body;
+                   
+                   const user =await User.findOne({email,password}).lean()
+                  if(!user){
+                      return res.json({status:'error',error:'invelid username/password'})
+                  } 
+                   if(await bycrypt.compare(password,user.password))
+                   {
+
+                    const  token =jwt.sign({
+                        id: user._id,
+                        username: user.email
+                    },JWT_SECRET)
+
+                    return res.json({status:'ok',error:token})
+                   }
+                });
+
         
                 //////
                 app.put('/users', async (req, res) => {
@@ -105,25 +159,7 @@ async function run(){
                     res.json(result);
                 });
         
-                //////////////
-                app.put('/users/admin', verifyToken, async (req, res) => {
-                    const user = req.body;
-                    const requester = req.decodedEmail;
-                    if (requester) {
-                        const requesterAccount = await usersCollection.findOne({ email: requester });
-                        if (requesterAccount.role === 'admin') {
-                            const filter = { email: user.email };
-                            const updateDoc = { $set: { role: 'admin' } };
-                            const result = await usersCollection.updateOne(filter, updateDoc);
-                            res.json(result);
-                        }
-                    }
-                    else {
-                        res.status(403).json({ message: 'you do not have access to make admin' })
-                    }
-        
-                });
-
+               
 
 
 
